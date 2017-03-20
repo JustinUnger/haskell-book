@@ -1,25 +1,41 @@
 {-# LANGUAGE QuasiQuotes #-}
 
+-- this version can deal with line comments and uses nanoparsec
+
 import Text.Printf
 import Text.RawString.QQ
-import Text.Trifecta
+import NanoParsec
 import Control.Applicative
 import Data.List
 
-type Year = Integer
-type Month = Integer
-type Day = Integer
+type Year = Int
+type Month = Int
+type Day = Int
 
 newtype Date = Date (Year,Month,Day)
-newtype Time = Time Integer
+newtype Time = Time Int
 
 data Activity = Activity Time String
 
 data OneDay = OneDay Date [Activity] 
 newtype Log = Log [OneDay]
 
-parseComment :: Parser ()
-parseComment = char '-' >> char '-' >> skipMany (notChar '\n') <* char '\n'
+--skipMany :: Alternative f => f a -> f ()
+--skipMany pa = () <$ many pa
+skipMany pa = many pa >> return ()
+
+count :: Applicative m => Int -> m a -> m [a]
+count 0 m = pure []
+count n m = (:) <$> m <*> count (n-1) m
+
+oneOf :: [Char] -> Parser Char
+oneOf cs = mySatisfy (flip elem cs)
+
+noneOf :: [Char] -> Parser Char
+noneOf cs = mySatisfy (not . flip elem cs)
+
+notChar :: Char -> Parser Char
+notChar c = mySatisfy (/= c)
 
 parseDate :: Parser Date
 parseDate = do
@@ -33,56 +49,33 @@ parseDate = do
 
 parseTime :: Parser Time
 parseTime = do
-    h <- count 2 digit 
+    h <- read <$> count 2 digit 
     _ <- char ':'
-    m <- count 2 digit
-    let h' = read h
-        m' = read m
-    if h' > 23 then fail "hour out of range" else
-        if m' > 59 then fail "minute out of range" else
-            return $ Time $ (h'*60) + m'
-
-stop :: Parser a
-stop = unexpected "stop"
+    m <- read <$> count 2 digit
+    if h > 23 then fail "hour out of range" else
+        if m > 59 then fail "minute out of range" else
+            return $ Time $ (h*60) + m
 
 skipEOL :: Parser ()
 skipEOL = skipMany (oneOf "\n")
-
-skipComments :: Parser ()
-skipComments =
-    skipMany (do _ <- try (char '-'  >> char '-')
-                 skipMany (noneOf "\n")
-                 skipEOL)
-
-parseActivity' :: Parser Activity
-parseActivity' = do
-    t <- parseTime
-    _ <- char ' '
-    act <- some (noneOf "\n") 
-    return $ Activity t act
 
 parseActivity :: Parser Activity
 parseActivity = do
     t <- parseTime
     _ <- char ' '
-    act <- some (noneOf "\n") <?> "act"
+    act <- some (noneOf "\n")
     skipEOL
-    -- notFollowedBy (skipComments <|> skipEOL) <?> "foo"
     return $ Activity t act
 
 skipWhitespace :: Parser ()
---skipWhitespace = skipMany (char ' ' <|> char '\n') 
 skipWhitespace = skipMany (oneOf " \n")
-
-parseLines :: Parser [String]
-parseLines = many $ many (noneOf "\n") <* char '\n'
 
 parseOneDay :: Parser OneDay
 parseOneDay = do
-    skipWhitespace <?> "whitespace"
-    skipComments <?> "comments"
-    d <- parseDate <* skipComments  <?> "date"
-    as <- many parseActivity  <?> "activities"
+    skipWhitespace
+    d <- parseDate
+    skipWhitespace
+    as <- many parseActivity
     return $ OneDay d as
 
 parseLog :: Parser Log
@@ -106,6 +99,27 @@ instance Show Time where
 
 instance Show Log where
     show (Log xs) = concatMap ((++ "\n") . show) xs
+
+comment :: Parser Char
+comment = do
+    char '-'
+    char '-'
+    many (notChar '\n')
+    char '\n'
+
+myItem :: Parser Char
+myItem = comment <|> item
+
+mySatisfy :: (Char -> Bool) -> Parser Char
+mySatisfy f = do
+    c <- myItem
+    if f c then return c else failure
+
+myChar :: Char -> Parser Char
+myChar c = mySatisfy (== c)
+
+sampleData :: Log
+sampleData = runParser parseLog sampleLog
 
 sampleLog :: String
 sampleLog = [r|
@@ -135,35 +149,4 @@ sampleLog = [r|
 21:00 Dinner
 21:15 Read
 22:00 Sleep
-a|]
-
-sampleData :: Result Log
-sampleData = parseString parseLog mempty sampleLog
-
--- won't work because parser discards comments
-parseLogTest s = case parseString parseLog mempty s of
-    Failure _ -> False
-    Success l -> show l == s
-
-com :: Parser Char
-com = char '-' >> char '-' >> many (notChar '\n') >> char '\n'
-com1 = try com <|> anyChar
-com2 = many com1
-
-comment :: Parser Char
-comment = do
-    char '-'
-    char '-'
-    many (notChar '\n')
-    char '\n'
-
-item :: Parser Char
-item = try comment <|> anyChar
-
-mySatisfy :: (Char -> Bool) -> Parser Char
-mySatisfy f = do
-    c <- item
-    if f c then return c else fail "mySatisfy"
-
-myChar :: Char -> Parser Char
-myChar c = mySatisfy (== c)
+|]
