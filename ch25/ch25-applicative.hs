@@ -43,3 +43,12 @@ x'' = getCompose x
 c1 :: Compose [] Maybe Int
 c1 = f <*> x
 
+instance (Foldable f, Foldable g) => Foldable (Compose f g) where
+ -- foldMap :: Monoid m => (a -> m) -> Compose f g a -> m    
+    foldMap f (Compose a) = (foldMap . foldMap) f a
+
+instance (Traversable f, Traversable g) => Traversable (Compose f g) where
+ -- traverse :: (Applicative f, Traversable t) => (a -> f b) -> t a -> f (t dab)
+ -- traverse :: (a -> f1 b) -> Compose f g a -> f1 (Compose f g b) 
+    traverse f (Compose fga) = Compose <$> (traverse . traverse) f fga
+
